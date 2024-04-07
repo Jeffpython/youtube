@@ -3,7 +3,12 @@ import os.path
 from pytube import YouTube
 from pytube.exceptions import VideoUnavailable
 from pytube.streams import Stream
+from pytube.cli import on_progress
 from pydub import AudioSegment
+from typer import Typer
+from rich.progress import track
+
+app = Typer()
 
 
 class Audio:
@@ -14,7 +19,7 @@ class Audio:
 
     def get_stream(self, url: str) -> Stream | None:
         try:
-            yt = YouTube(url)
+            yt = YouTube(url, on_progress_callback=on_progress)
         except VideoUnavailable:
             print("Video is unavailable")
         else:
@@ -22,36 +27,46 @@ class Audio:
             self.title = yt.title
             return yt.streams.get_audio_only(subtype='mp4')
 
-    def save_temp_audio(self, stream: Stream) -> None:
-        audio.path = stream.download()
-        print('Youtube file is downloaded')
+    def save_original_file(self, stream: Stream) -> None:
+        self.path = stream.download()
 
 
-def save_split_audio(temp_file: AudioSegment) -> None:
+def split_original_file(temp_file: AudioSegment, title: str, split_duration: int) -> None:
     duration = len(temp_file)
-    interval = 10 * 60 * 1000
+    interval = split_duration * 60 * 1000
     num_files = math.ceil(duration / interval)
     begin = 0
 
-    for i in range(num_files):
+    for i in track(range(num_files), description="File splitting..."):
         end = begin + interval if begin + interval < duration else duration
         part = temp_file[begin:end]
-        part.export(f'{audio.title} {i + 1}.mp3', format='mp3')
+        part.export(f'{title} {i + 1}.mp3', format='mp3')
         begin = end
 
 
-def remove_temp_audio(path: str) -> None:
+def remove_original_file(path: str) -> None:
     if os.path.exists(path):
         os.remove(path)
 
 
-if __name__ == "__main__":
-    # url = "https://www.youtube.com/watch?v=25xUoLye53w"
-    url = input("Enter Youtube URL: ")
+@app.command()
+def main(url: str, split_file: bool = True, split_duration: int = 10) -> None:
+    """
+    Write url from youtube to download (for example: https://www.youtube.com/watch?v=25xUoLye53w).
+    Use 'no-split-file' if you don't need to split the file.
+    If necessary, specify the duration of the files in minutes in 'split-duration'.
+    """
     audio = Audio()
+    print('Download a file from Youtube...')
     stream = audio.get_stream(url)
-    audio.save_temp_audio(stream)
-    temp_file = AudioSegment.from_file(audio.path, 'mp4')
-    save_split_audio(temp_file)
-    print('File split')
-    remove_temp_audio(path=audio.path)
+    audio.save_original_file(stream)
+    print('Youtube file is downloaded ')
+
+    if split_file:
+        original_file = AudioSegment.from_file(audio.path, 'mp4')
+        split_original_file(original_file, audio.title, split_duration)
+        remove_original_file(path=audio.path)
+
+
+if __name__ == "__main__":
+    app()
